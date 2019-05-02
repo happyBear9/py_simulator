@@ -1,0 +1,61 @@
+<launch>
+
+
+<node pkg="py_swarm" name="simulator" type="simulator.py" output="screen"/>
+
+
+  <group ns="r1">
+    <param name="selfID" value="1"/>
+    <node pkg="py_swarm" name="robot_node" type="robot.py"/>    
+  </group>
+
+  <group ns="r2">
+    <param name="selfID" value="2"/>
+    <node pkg="py_swarm" name="robot_node" type="robot.py"/>    
+  </group>
+
+  <group ns="r3">
+    <param name="selfID" value="3"/>
+    <node pkg="py_swarm" name="robot_node" type="robot.py"/>    
+  </group>
+
+  <group ns="r4">
+    <param name="selfID" value="4"/>
+    <node pkg="py_swarm" name="robot_node" type="robot.py"/>    
+  </group>
+
+  <group ns="r5">
+    <param name="selfID" value="5"/>
+    <node pkg="py_swarm" name="robot_node" type="robot.py"/>    
+  </group>
+
+  <group ns="r6">
+    <param name="selfID" value="6"/>
+    <node pkg="py_swarm" name="robot_node" type="robot.py"/>    
+  </group>
+
+  <group ns="r7">
+    <param name="selfID" value="7"/>
+    <node pkg="py_swarm" name="robot_node" type="robot.py"/>    
+  </group>
+
+  <group ns="r8">
+    <param name="selfID" value="8"/>
+    <node pkg="py_swarm" name="robot_node" type="robot.py"/>    
+  </group>
+
+  <group ns="r9">
+    <param name="selfID" value="9"/>
+    <node pkg="py_swarm" name="robot_node" type="robot.py"/>    
+  </group>
+
+
+
+
+
+
+
+
+
+
+</launch>
