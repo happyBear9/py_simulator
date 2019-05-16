@@ -37,7 +37,7 @@ class q_learning:
         self.ax.set_ylim(-2, 9), self.ax.set_yticks([])
         self.r_sim = np.array([[1,1],[2,4],[4,6],[6,0]])
         self.s_prev = np.empty([6])
-
+        self.r_perm = np.array([[1,1],[2,4],[4,6],[6,0]])
 
         #rewards
         self.travel_empty_cost = 20
@@ -269,6 +269,10 @@ class q_learning:
             total_cost += cost
         return x, u, total_cost
 
+    def init_animate(self):
+        self.r_sim = self.r_perm
+        print "sim restarted"
+
     def animate(self,i):
         #offset
         self.ax.clear()
@@ -295,10 +299,19 @@ class q_learning:
                     break
             robot_x_full.append(s[0]+ xo)
             robot_y_full.append(s[1]+ yo)
-        else:
+        elif self.s_prev[4] == 1 and s[4] == 0:
+            #robot1 dropped resource
+            r = np.append(self.r,[s[0:2]],axis=0)
             robot_x_empty.append(s[0]+ xo)
             robot_y_empty.append(s[1]+ yo)
-        #robot2
+        elif self.s_prev[4] == 1 and s[4] == 1:
+            robot_x_full.append(s[0]+ xo)
+            robot_y_full.append(s[1]+ yo)
+        elif self.s_prev[4] == 0 and s[4] == 0:
+            robot_x_empty.append(s[0]+ xo)
+            robot_y_empty.append(s[1]+ yo)
+
+        #robot2 pick
         if self.s_prev[5] == 0 and s[5] == 1:
             #robot 2 picked up resource
             for i,k in enumerate(r):
@@ -307,9 +320,19 @@ class q_learning:
                     break
             robot_x_full.append(s[2]+ xo)
             robot_y_full.append(s[3]+ yo)
-        else:
+        elif self.s_prev[5] == 1 and s[5] == 0:
+            #robot2 dropped resource
+            r = np.append(self.r,[s[2:4]],axis=0)
             robot_x_empty.append(s[2]+ xo)
             robot_y_empty.append(s[3]+ yo)
+        elif self.s_prev[5] == 1 and s[5] == 1:
+            robot_x_full.append(s[2]+ xo)
+            robot_y_full.append(s[3]+ yo)
+        elif self.s_prev[5] == 0 and s[5] == 0:
+            robot_x_empty.append(s[2]+ xo)
+            robot_y_empty.append(s[3]+ yo)
+
+
 
         self.s_prev = s.copy()
         self.r_sim = r.copy()
@@ -338,7 +361,7 @@ class q_learning:
 
             x = np.empty([6, horizon+1])
             #initial position
-            x[:,0] = np.array([2,3,4,3,0,0])
+            x[:,0] = np.array([2,4,4,3,0,0])
             for j in range(horizon):
                 xt = x[:,j]
                 xt_idx = self.get_state_idx(xt)
@@ -372,6 +395,9 @@ class q_learning:
             self.policy = P_new.copy()
             self.value_function = J_new.copy()
 
+            #repop resources
+            self.r = self.r_perm.copy()
+
             #update status
             update_progress(float(i)/ float(iter),self.epsilon)
 
@@ -385,7 +411,7 @@ class q_learning:
         print "learning completed"
         print "simulating env."
         #init condition
-        x0 = np.array([2,3,4,3,0,0])
+        x0 = np.array([2,4,4,3,0,0])
         p = self.policy.copy()
 
         X, U, total_cost = self.simulate(x0,p)
@@ -396,7 +422,7 @@ class q_learning:
         #show simulated results
         self.sim_result = X
         self.sim_control = U
-        ani = animation.FuncAnimation(self.fig,self.animate,frames=self.horizon,interval=200)
+        ani = animation.FuncAnimation(self.fig,self.animate,init_func=self.init_animate, frames=self.horizon,interval=200)
         plt.show()
 
 def update_progress(progress,e):
@@ -427,7 +453,7 @@ def init_q_learning():
     nu = 6**robots 
 
     student = q_learning(nq,nu) 
-    student.iterate(1000000)
+    student.iterate(10000)
 
 if __name__ == '__main__':
     init_q_learning()
