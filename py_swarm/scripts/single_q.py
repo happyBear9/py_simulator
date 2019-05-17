@@ -10,9 +10,10 @@ import matplotlib.animation as animation
 class q_learning:
 
     def __init__(self,nq,nu):
-        self.epsilon = 0.1
-        self.gamma = 0.99
-        self.alpha = 0.1
+        #decay epsilon
+        self.epsilon = 1.0
+        self.gamma = 0.8
+        self.alpha = 0.4
 
         self.nu = nu
         self.nq = nq
@@ -28,43 +29,53 @@ class q_learning:
         self.r = np.array([[1,1],[2,4],[4,6],[6,0]])
         self.r_perm = np.array([[1,1],[2,4],[4,6],[6,0]])
 
-        self.horizon = 4
-
-        self.total_cost = 100
+        self.horizon = 10
 
         #rewards
-        self.nothing_cost = 0.05
-        self.travel_empty_cost = 0.2
-        self.collision_with_wall_cost = 1
-        self.travel_with_resource_cost = 0.5
-        self.pick_when_full_cost = 1
-        self.pick_when_empty_cost = -5
-        self.pick_dud_cost = 1
-        self.drop_success_cost = -10
-        self.drop_wrong_spot_cost = 1
-        self.drop_nothing_cost = 1
+        self.travel_empty_cost = 1
+        self.collision_with_wall_cost = 10
+        self.travel_with_resource_cost = 1
+        self.pick_when_full_cost = 10
+        self.pick_when_empty_cost = -20
+        self.pick_dud_cost = 20
+        self.drop_success_cost = -20
+        self.drop_wrong_spot_cost = 20
+        self.drop_nothing_cost = 20
 
+        #sim parameters
+        self.sim_result = None
+        self.sim_control = None
+        self.fig = plt.figure(figsize=(8, 8))
+        self.ax = self.fig.add_axes([0, 0, 1, 1],autoscale_on=True, frameon=False)
+        self.ax.set_xlim(-2, 9), self.ax.set_xticks([])
+        self.ax.set_ylim(-2, 9), self.ax.set_yticks([])
+        self.r_sim = np.array([[1,1],[2,4],[4,6],[6,0]])
+        self.s_prev = np.empty([3])
+        self.r_perm = np.array([[1,1],[2,4],[4,6],[6,0]])
 
     def get_state_idx(self,x):
-        idx = x[2] + x[1]*2 + x[0]*7*2
+        idx = x[6] + x[5]*2 + x[4]*2**2 + x[3]*2**3 +x[2]*2**4 + x[1]*2**5 + x[0]*2**5*7
         return int(idx)
 
     def get_state(self,idx):
-        x = np.empty([3])
-        x[0] = idx/(2*7)
-        rem = idx%(2*7)
-        x[1] = rem/(2)
-        rem = rem%(2)
-        x[2] = rem
-
+        x = np.empty([7])
+        x[0] = idx/(2**5*7)
+        rem = idx%(2**5*7)
+        x[1] = rem/(2**5)
+        rem = rem%(2**5)
+        x[2] = rem/(2**4)
+        rem = rem%(2**4)
+        x[3] = rem/(2**3)
+        rem = rem%(2**3)
+        x[4] = rem/(2**2)
+        rem = rem%(2**2)
+        x[5] = rem/(2)
+        X[6] = rem%(2)
         return x
 
     def get_action(self,a_idx):
         a = np.zeros(6)
-        if a_idx != 0:
-            a[a_idx-1] = 1
-        elif a_idx == 6:
-            a[a_idx] = 1
+        a[a_idx] = 1
         return a
 
     def get_next_state_and_cost(self,s,u):
@@ -73,108 +84,183 @@ class q_learning:
 
         pos = s[0:2]
         res = s[2]
+        s_next = s
 
-        if u == 0:
-            #doing nothing
-            # print "idle"
-            return s,self.nothing_cost
-        else:
-            #extract current action
-            a = np.argmax(self.get_action(u))  
-            
-            if a < 4:
-                #movement action
-                # print "movement action"
-                next_pos = self.m[a] + pos
-                if next_pos[0] < 0 or next_pos[0] > 6 or next_pos[1] < 0 or next_pos[1] > 6:
-                    #wall collision
-                    return s,self.collision_with_wall_cost
+        #extract current action
+        a = np.argmax(self.get_action(u))  
+        
+        if a < 4:
+            #movement action
+            # print "movement action"
+            next_pos = self.m[a] + pos
+            if next_pos[0] < 0 or next_pos[0] > 6 or next_pos[1] < 0 or next_pos[1] > 6:
+                #wall collision
+                return s,self.collision_with_wall_cost
+            else:
+                s_next[0:2] = next_pos
+                if res:
+                    cost = self.travel_with_resource_cost
                 else:
-                    s_next = np.concatenate((next_pos, res), axis=None)
-                    if res:
-                        cost = self.travel_with_resource_cost
+                    cost = self.travel_empty_cost
+                return s_next,cost
+        else:
+            # print "pick/place action"
+            if a == 4:
+                #pick action
+                if res:
+                    #trying to pick when full
+                    return s,self.pick_when_full_cost
+                else:
+                    #check if picked in resource position
+                    if any((pos==k).all() for k in self.r):
+                        # print "picked up resource"
+                        res = 1
+                        #remove resource from r list
+                        for i,k in enumerate(self.r):
+                            if np.array_equal(self.r_perm[0], k):
+                                s_next[3] = 0
+                            elif np.array_equal(self.r_perm[1], k):
+                                s_next[4] = 0
+                            elif np.array_equal(self.r_perm[2], k):
+                                s_next[5] = 0
+                            elif np.array_equal(self.r_perm[3], k):
+                                s_next[6] = 0
+   
+                            if np.array_equal(pos, k):
+                                r_curr = np.delete(r_curr,i,axis=0)
+                                break
+                        cost = self.pick_when_empty_cost
                     else:
-                        cost = self.travel_empty_cost
+                        # print "dud pick"
+                        cost = self.pick_dud_cost
+
+                    self.r = r_curr
+                    s_next[2] = 1
                     return s_next,cost
             else:
-                # print "pick/place action"
-                if a == 4:
-                    #pick action
-                    if res:
-                        #trying to pick when full
-                        return s,self.pick_when_full_cost
+                #drop action
+                if res:
+                    #drop carrying resource
+                    if np.array_equal(pos, self.home):
+                        # print "dropped in home position - congrats"
+                        res = 0
+                        cost = self.drop_success_cost
+                        s_next[2] = 0
                     else:
-                        #check if picked in resource position
-                        if any((pos==k).all() for k in self.r):
-                            # print "picked up resource"
-                            res = 1
-                            #remove resource from r list
-                            for i,k in enumerate(self.r):
-                                if np.array_equal(pos, k):
-                                    r_curr = np.delete(r_curr,i,axis=0)
-                                    break
-                            cost = self.pick_when_empty_cost
-                        else:
-                            # print "dud pick"
-                            cost = self.pick_dud_cost
-
+                        # print "dropped at wrong spot"
+                        res = 0
+                        #add resource to new spot
+                        r_curr = np.append(r_curr,[pos],axis=0)
+                        # print r_curr
                         self.r = r_curr
-                        s_next = np.concatenate((s[0:2], res), axis=None)
-                        return s_next,cost
-
+                        cost = self.drop_wrong_spot_cost
+                        s_next[2] = 0
+                    return s_next,cost
                 else:
-                    #drop action
-                    if res:
-                        #drop carrying resource
-                        if np.array_equal(pos, self.home):
-                            # print "dropped in home position - congrats"
-                            res = 0
-                            cost = self.drop_success_cost
-                        else:
-                            # print "dropped at wrong spot"
-                            res = 0
-                            #add resource to new spot
-                            r_curr = np.append(r_curr,[pos],axis=0)
-                            # print r_curr
-                            self.r = r_curr
-                            cost = self.drop_wrong_spot_cost
-                        s_next = np.concatenate((s[0:2], res), axis=None)
-                        return s_next,cost
-                    else:
-                        # print "dropped nothing"
-                        cost = self.drop_nothing_cost
-                        return s,cost
+                    # print "dropped nothing"
+                    cost = self.drop_nothing_cost
+                    return s,cost
               
     def simulate(self,x0,P):
         horizon = self.horizon
-        x=np.empty([3, horizon+1])
+        x=np.empty([7, horizon+1])
         x[:,0] = x0
         u = np.empty([horizon])
         total_cost = 0
         for i in range(horizon):
+            print x[:,i],i
             u[i] = P[self.get_state_idx(x[:,i])]
             x[:,i+1],cost = self.get_next_state_and_cost(x[:,i], int(u[i]))
             total_cost += cost
         return x, u, total_cost
 
+    def decay_epsilon(self,i,num_iter):
+        self.epsilon = 1.0 * (1 - float(i)/num_iter)
+
+    def init_animate(self):
+        self.r_sim = self.r_perm.copy()
+        self.s_prev = self.sim_result[:,0]
+        print "sim restarted"
+
+    def animate(self,i):
+        #offset
+        self.ax.clear()
+
+        xo,yo = 0.5,0.5
+        borders_x = [0,0,7,7,0]
+        borders_y = [0,7,7,0,0]     
+        r = self.r_sim.copy()
+        s = self.sim_result[:,i]
+
+        
+        robot_x_empty = []
+        robot_y_empty = []
+        robot_x_full = []
+        robot_y_full = []
+
+        #robot1
+        if self.s_prev[2] == 0 and s[2] == 1:
+            #robot 1 picked up resource
+            for i,k in enumerate(r):
+                if np.array_equal(s[0:2], k):
+                    r = np.delete(r,i,axis=0)
+                    break
+            robot_x_full.append(s[0]+ xo)
+            robot_y_full.append(s[1]+ yo)
+        elif self.s_prev[2] == 1 and s[2] == 0:
+            #robot1 dropped resource
+            r = np.append(self.r,[s[0:2]],axis=0)
+            robot_x_empty.append(s[0]+ xo)
+            robot_y_empty.append(s[1]+ yo)
+        elif self.s_prev[2] == 1 and s[2] == 1:
+            robot_x_full.append(s[0]+ xo)
+            robot_y_full.append(s[1]+ yo)
+        elif self.s_prev[2] == 0 and s[2] == 0:
+            robot_x_empty.append(s[0]+ xo)
+            robot_y_empty.append(s[1]+ yo)
+
+        self.s_prev = s.copy()
+        self.r_sim = r.copy()
+
+        r = r.T
+        xr = r[0] + xo
+        yr = r[1] + yo
+        xh,yh = 3+xo,3+yo
+
+
+
+        print s,self.get_action(int(self.sim_control[i])),i
+        
+        self.ax.scatter(robot_x_full,robot_y_full,color='red',marker ='o',s=10**2.5,alpha = 0.2)
+        self.ax.scatter(robot_x_empty,robot_y_empty,color='green',marker ='o',s=10**2.5,alpha = 0.2)
+        self.ax.scatter(xh,yh,color='blue',marker ='s',s=10**3,alpha = 0.2)
+        self.ax.scatter(xr,yr,color='red')
+        self.ax.plot(borders_x,borders_y)
+
+
     def learn(self,iter):
         #initiate learning episode
         horizon = self.horizon
         for i in range(iter):
+            # print ""
+            # print "New iteration: " + str(i)
+            # print ""
             Q_new = self.q_function.copy()
             J_new = self.value_function.copy()
             P_new = self.policy.copy()
 
-            x = np.empty([3, horizon+1])
+            x = np.empty([7, horizon+1])
             #initial position
-            x[:,0] = np.array([2,3,0])
+            x[:,0] = np.array([2,3,0,1,1,1,1])
 
             for j in range(horizon):
                 xt = x[:,j]
                 xt_idx = self.get_state_idx(xt)
               
                 #optimal policy at current step 
-                u_opt = np.argmin(self.q_function[xt_idx,:])  
+                u_opt = np.argmin(self.q_function[xt_idx,:]) 
+
+
 
                 #epsilion-greedy approach
                 if np.random.uniform(0, 1) < self.epsilon:
@@ -188,11 +274,10 @@ class q_learning:
 
                 #calculate temporal difference
                 x_nxt,cost = self.get_next_state_and_cost(xt,u_curr)
-                total_cost =  self.total_cost + cost
                 x_nxt_idx = self.get_state_idx(x_nxt)
                 opt_next_state_Q = np.min(self.q_function[x_nxt_idx,:])
                 current_Q = self.q_function[xt_idx,u_curr]
-                TD = total_cost + self.gamma*opt_next_state_Q - current_Q
+                TD = cost + self.gamma*opt_next_state_Q - current_Q
                 #update Q
                 Q_new[xt_idx,u_curr] += self.alpha*TD
 
@@ -203,36 +288,36 @@ class q_learning:
                 J_new[xt_idx] = opt_next_state_Q
                 P_new[xt_idx] = u_opt
 
+                # print "current state: " + str(xt)
+                # print "optimal action: " + str(u_opt)
+                # print "current action: " + str(u_curr)
+                # print "next state: " + str(x_nxt)
+                # print "current state Q: " + str(Q_new[xt_idx,:])
+                # print "next state values Q: " + str(self.q_function[x_nxt_idx,:])
+                # print "optimal next Q: " + str(opt_next_state_Q)
+                # print "Qt: " + str(Q_new[xt_idx,u_curr])
+                # print "cost: " + str(cost)
+                # print "E: " + str(self.epsilon)
+                # print ""
+
+                #update status
+                # update_progress(float(i)/ float(iter),self.epsilon)
+
             #store new J and P
             self.policy = P_new.copy()
             self.value_function = J_new.copy()
-            self.total_cost = total_cost
             #repop resources
             self.r = self.r_perm.copy()
+            self.q_function = Q_new.copy()
 
-            
-
-            #update Q table
-            if ((self.q_function-Q_new)**2 < 10e-5).all():
-                print("CONVERGED after iteration " + str(i))
-                break
-            else:
-                self.q_function = Q_new.copy()
-
-        print Q_new[self.get_state_idx(x[:,0]),:],i
-        print ""
-        print Q_new[self.get_state_idx(x[:,1]),:],i
-        print ""
-        print Q_new[self.get_state_idx(x[:,2]),:],i
-        print ""
-        print Q_new[self.get_state_idx(x[:,3]),:],i
-        print ""
+            self.decay_epsilon(i,iter)
 
         #simulate and animate
         print "learning completed"
         print "simulating env."
         #init condition
         x0 = x[:,0]
+        print x0
         p = self.policy.copy()
 
         X, U, total_cost = self.simulate(x0,p)
@@ -248,9 +333,25 @@ class q_learning:
         # #show simulated results
         # self.sim_result = X
         # self.sim_control = U
-        # ani = animation.FuncAnimation(self.fig,self.animate,init_func=self.init_animate, frames=self.horizon,interval=200)
+        # ani = animation.FuncAnimation(self.fig,self.animate,init_func=self.init_animate, frames=self.horizon,interval=500)
         # plt.show()
 
+def update_progress(progress,e):
+        bar_length = 20
+        if isinstance(progress, int):
+            progress = float(progress)
+        if not isinstance(progress, float):
+            progress = 0
+        if progress < 0:
+            progress = 0
+        if progress >= 1:
+            progress = 1
+
+        block = int(round(bar_length * progress))
+
+        os.system( 'clear' )
+        text = "Progress: [{0}] {1:.1f}%".format( "#" * block + "-" * (bar_length - block), progress * 100) + " e: " + str(e)
+        print(text)
 
 def init_q_learning():
     # print "Initializing data"
@@ -259,12 +360,12 @@ def init_q_learning():
     bin_actions = 2
 
     #states - robots' position, robot resource condition
-    nq = (grid_size*grid_size)*bin_actions**2
+    nq = grid_size*grid_size*2*2*2*2*2
     #actions - stay,up,down,right,left,pick,drop
-    nu = 7**robots 
+    nu = 6**robots 
 
     student = q_learning(nq,nu) 
-    student.learn(100)
+    student.learn(50000)
 
 
 
