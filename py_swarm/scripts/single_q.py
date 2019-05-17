@@ -29,8 +29,7 @@ class q_learning:
         self.r = np.array([[1,1],[2,4],[4,6],[6,0]])
         self.r_perm = np.array([[1,1],[2,4],[4,6],[6,0]])
 
-        self.horizon = 10
-
+        self.horizon = 40
         #rewards
         self.travel_empty_cost = 1
         self.collision_with_wall_cost = 10
@@ -84,10 +83,13 @@ class q_learning:
 
         pos = s[0:2]
         res = s[2]
-        s_next = s
-
+        s_next = s.copy()
         #extract current action
         a = np.argmax(self.get_action(u))  
+
+        # print "current state: " + str(s)
+        # print "action: " + str(a)
+        # print "current resources: " + str(r_curr)
         
         if a < 4:
             #movement action
@@ -95,7 +97,7 @@ class q_learning:
             next_pos = self.m[a] + pos
             if next_pos[0] < 0 or next_pos[0] > 6 or next_pos[1] < 0 or next_pos[1] > 6:
                 #wall collision
-                return s,self.collision_with_wall_cost
+                return s_next,self.collision_with_wall_cost
             else:
                 s_next[0:2] = next_pos
                 if res:
@@ -109,33 +111,39 @@ class q_learning:
                 #pick action
                 if res:
                     #trying to pick when full
-                    return s,self.pick_when_full_cost
+                    return s_next,self.pick_when_full_cost
                 else:
                     #check if picked in resource position
-                    if any((pos==k).all() for k in self.r):
+                    if any(np.array_equal(pos, k) for k in self.r):
                         # print "picked up resource"
-                        res = 1
-                        #remove resource from r list
+                        #remove resource from r list  
                         for i,k in enumerate(self.r):
-                            if np.array_equal(self.r_perm[0], k):
-                                s_next[3] = 0
-                            elif np.array_equal(self.r_perm[1], k):
-                                s_next[4] = 0
-                            elif np.array_equal(self.r_perm[2], k):
-                                s_next[5] = 0
-                            elif np.array_equal(self.r_perm[3], k):
-                                s_next[6] = 0
-   
                             if np.array_equal(pos, k):
-                                r_curr = np.delete(r_curr,i,axis=0)
-                                break
+                                    r_curr = np.delete(r_curr,i,axis=0)
+                                    break
+                        
+                        s_next[3:] = np.zeros(4)
+                        for i,k in enumerate(r_curr):
+                            if np.array_equal(self.r_perm[0], k):
+                                s_next[3] = 1
+                            elif np.array_equal(self.r_perm[1], k):
+                                s_next[4] = 1
+                            elif np.array_equal(self.r_perm[2], k):
+                                s_next[5] = 1
+                            elif np.array_equal(self.r_perm[3], k):
+                                s_next[6] = 1
+                            else:
+                                pass
+   
                         cost = self.pick_when_empty_cost
+                        s_next[2] = 1
                     else:
                         # print "dud pick"
+                        s_next[2] = 0
                         cost = self.pick_dud_cost
 
                     self.r = r_curr
-                    s_next[2] = 1
+                    
                     return s_next,cost
             else:
                 #drop action
@@ -159,19 +167,21 @@ class q_learning:
                 else:
                     # print "dropped nothing"
                     cost = self.drop_nothing_cost
-                    return s,cost
+                    return s_next,cost
               
-    def simulate(self,x0,P):
+    def simulate(self,x0):
         horizon = self.horizon
+        P = self.policy.copy()
         x=np.empty([7, horizon+1])
-        x[:,0] = x0
+        x[:,0] = x0.copy()
         u = np.empty([horizon])
         total_cost = 0
         for i in range(horizon):
-            print x[:,i],i
-            u[i] = P[self.get_state_idx(x[:,i])]
-            x[:,i+1],cost = self.get_next_state_and_cost(x[:,i], int(u[i]))
+            xt = x[:,i].copy()
+            ut = P[self.get_state_idx(xt)]
+            x[:,i+1],cost = self.get_next_state_and_cost(xt, int(ut))
             total_cost += cost
+            u[i] = ut
         return x, u, total_cost
 
     def decay_epsilon(self,i,num_iter):
@@ -201,15 +211,15 @@ class q_learning:
         #robot1
         if self.s_prev[2] == 0 and s[2] == 1:
             #robot 1 picked up resource
-            for i,k in enumerate(r):
+            for j,k in enumerate(self.r_sim):
                 if np.array_equal(s[0:2], k):
-                    r = np.delete(r,i,axis=0)
+                    r = np.delete(r,j,axis=0)
                     break
             robot_x_full.append(s[0]+ xo)
             robot_y_full.append(s[1]+ yo)
         elif self.s_prev[2] == 1 and s[2] == 0:
             #robot1 dropped resource
-            r = np.append(self.r,[s[0:2]],axis=0)
+            r = np.append(r,[s[0:2]],axis=0)
             robot_x_empty.append(s[0]+ xo)
             robot_y_empty.append(s[1]+ yo)
         elif self.s_prev[2] == 1 and s[2] == 1:
@@ -227,14 +237,40 @@ class q_learning:
         yr = r[1] + yo
         xh,yh = 3+xo,3+yo
 
+        #text overlays
+        t1 = "Step: " + str(i+1)
+        t2 = "Robot Position(x,y): (" + str(s[0]) + "," + str(s[1]) + ")" 
+        if s[2]:
+            t3 = "Robot carrying resource - TRUE"
+        else:
+            t3 = "Robot carrying resource - FALSE"
+        a = int(self.sim_control[i])
 
+        if a == 0:
+            t4 = "Next action - up"
+        elif a == 1:
+            t4 = "Next action - down"
+        elif a == 1:
+            t4 = "Next action - left"
+        elif a == 1:
+            t4 = "Next action - right"
+        elif a == 1:
+            t4 = "Next action - pick"
+        else:
+            t4 = "Next action - drop"
 
-        print s,self.get_action(int(self.sim_control[i])),i
+       
+        
+        self.ax.text(0.2, 6.7, t1, ha='left', wrap=True)
+        self.ax.text(0.2, 6.5, t2, ha='left', wrap=True)
+        self.ax.text(0.2, 6.3, t3, ha='left', wrap=True)
+        self.ax.text(0.2, 6.1, t4, ha='left', wrap=True)
+
         
         self.ax.scatter(robot_x_full,robot_y_full,color='red',marker ='o',s=10**2.5,alpha = 0.2)
         self.ax.scatter(robot_x_empty,robot_y_empty,color='green',marker ='o',s=10**2.5,alpha = 0.2)
         self.ax.scatter(xh,yh,color='blue',marker ='s',s=10**3,alpha = 0.2)
-        self.ax.scatter(xr,yr,color='red')
+        self.ax.scatter(xr,yr,color='red',alpha = 0.2)
         self.ax.plot(borders_x,borders_y)
 
 
@@ -242,9 +278,6 @@ class q_learning:
         #initiate learning episode
         horizon = self.horizon
         for i in range(iter):
-            # print ""
-            # print "New iteration: " + str(i)
-            # print ""
             Q_new = self.q_function.copy()
             J_new = self.value_function.copy()
             P_new = self.policy.copy()
@@ -253,8 +286,9 @@ class q_learning:
             #initial position
             x[:,0] = np.array([2,3,0,1,1,1,1])
 
+
             for j in range(horizon):
-                xt = x[:,j]
+                xt = x[:,j].copy()
                 xt_idx = self.get_state_idx(xt)
               
                 #optimal policy at current step 
@@ -288,20 +322,6 @@ class q_learning:
                 J_new[xt_idx] = opt_next_state_Q
                 P_new[xt_idx] = u_opt
 
-                # print "current state: " + str(xt)
-                # print "optimal action: " + str(u_opt)
-                # print "current action: " + str(u_curr)
-                # print "next state: " + str(x_nxt)
-                # print "current state Q: " + str(Q_new[xt_idx,:])
-                # print "next state values Q: " + str(self.q_function[x_nxt_idx,:])
-                # print "optimal next Q: " + str(opt_next_state_Q)
-                # print "Qt: " + str(Q_new[xt_idx,u_curr])
-                # print "cost: " + str(cost)
-                # print "E: " + str(self.epsilon)
-                # print ""
-
-                #update status
-                # update_progress(float(i)/ float(iter),self.epsilon)
 
             #store new J and P
             self.policy = P_new.copy()
@@ -311,47 +331,32 @@ class q_learning:
             self.q_function = Q_new.copy()
 
             self.decay_epsilon(i,iter)
+            # print x[:,0],i
 
-        #simulate and animate
+
         print "learning completed"
         print "simulating env."
+
+
         #init condition
         x0 = x[:,0]
-        print x0
-        p = self.policy.copy()
+        X, U, total_cost = self.simulate(x0)
 
-        X, U, total_cost = self.simulate(x0,p)
-
+        print ""
         print X
         print ""
         print U
 
-        # self.s_prev = X[:,0]
+        self.s_prev = X[:,0]
 
-        # print "Total cost: " + str(total_cost)
+        print "Total cost: " + str(total_cost)
 
-        # #show simulated results
-        # self.sim_result = X
-        # self.sim_control = U
-        # ani = animation.FuncAnimation(self.fig,self.animate,init_func=self.init_animate, frames=self.horizon,interval=500)
-        # plt.show()
+        #show simulated results
+        self.sim_result = X
+        self.sim_control = U
+        ani = animation.FuncAnimation(self.fig,self.animate,init_func=self.init_animate, frames=self.horizon,interval=500)
+        plt.show()
 
-def update_progress(progress,e):
-        bar_length = 20
-        if isinstance(progress, int):
-            progress = float(progress)
-        if not isinstance(progress, float):
-            progress = 0
-        if progress < 0:
-            progress = 0
-        if progress >= 1:
-            progress = 1
-
-        block = int(round(bar_length * progress))
-
-        os.system( 'clear' )
-        text = "Progress: [{0}] {1:.1f}%".format( "#" * block + "-" * (bar_length - block), progress * 100) + " e: " + str(e)
-        print(text)
 
 def init_q_learning():
     # print "Initializing data"
@@ -365,9 +370,7 @@ def init_q_learning():
     nu = 6**robots 
 
     student = q_learning(nq,nu) 
-    student.learn(50000)
-
-
+    student.learn(5000)
 
 
 
